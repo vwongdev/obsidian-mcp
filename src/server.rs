@@ -11,7 +11,10 @@ use rmcp::{
 use serde::Deserialize;
 use tokio::task;
 
-use crate::vault::{self, Vault};
+use crate::{
+    links,
+    vault::{self, Vault},
+};
 
 const DEFAULT_SEARCH_LIMIT: usize = 50;
 const MAX_SEARCH_LIMIT: usize = 200;
@@ -103,6 +106,27 @@ impl ObsidianServer {
     }
 
     #[tool(
+        description = "List the links in a note as `target -> path`, resolving each target to the vault path it points to, or `(unresolved)`."
+    )]
+    async fn list_links(
+        &self,
+        Parameters(PathParams { path }): Parameters<PathParams>,
+    ) -> Result<String, String> {
+        self.run(move |vault| {
+            let files = file_paths(vault)?;
+            let lines: Vec<_> = links::extract(&vault.read(&path)?)
+                .into_iter()
+                .map(|target| {
+                    let resolved = links::resolve(&target, &path, &files).unwrap_or("(unresolved)");
+                    format!("{target} -> {resolved}")
+                })
+                .collect();
+            Ok(lines.join("\n"))
+        })
+        .await
+    }
+
+    #[tool(
         description = "Search notes for text, case-insensitively. Returns matching paths and `path:line: text` matches."
     )]
     async fn search_notes(
@@ -190,6 +214,10 @@ fn read_all(vault: &Vault, paths: &[String]) -> String {
         })
         .collect();
     notes.join("\n\n")
+}
+
+fn file_paths(vault: &Vault) -> vault::Result<Vec<String>> {
+    Ok(vault.files("")?.into_iter().map(|file| file.path).collect())
 }
 
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {
