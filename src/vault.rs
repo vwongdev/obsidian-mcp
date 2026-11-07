@@ -2,6 +2,7 @@ use std::{
     fmt, io,
     io::Write,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use cap_std::{
@@ -14,6 +15,13 @@ const CONFIG_DIR: &str = ".obsidian";
 /// A vault directory handle; every path is opened relative to it, so `..` and symlinks cannot escape.
 pub struct Vault {
     root: Dir,
+}
+
+/// A file found by [`Vault::files`].
+#[derive(Debug, PartialEq)]
+pub struct File {
+    pub path: String,
+    pub modified: SystemTime,
 }
 
 #[derive(Debug)]
@@ -80,7 +88,7 @@ impl Vault {
     }
 
     /// Lists files under a folder recursively, skipping symlinks and the Obsidian config directory.
-    pub fn files(&self, folder: &str) -> Result<Vec<String>> {
+    pub fn files(&self, folder: &str) -> Result<Vec<File>> {
         let mut files = Vec::new();
         if folder.is_empty() {
             walk(&self.root, Path::new(""), &mut files)?;
@@ -88,7 +96,7 @@ impl Vault {
             let folder = self.resolve(folder)?;
             walk(&self.root.open_dir(&folder)?, &folder, &mut files)?;
         }
-        files.sort();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(files)
     }
 
@@ -128,7 +136,7 @@ impl Vault {
     }
 }
 
-fn walk(dir: &Dir, prefix: &Path, files: &mut Vec<String>) -> io::Result<()> {
+fn walk(dir: &Dir, prefix: &Path, files: &mut Vec<File>) -> io::Result<()> {
     for entry in dir.entries()? {
         let entry = entry?;
         let name = entry.file_name();
@@ -137,7 +145,10 @@ fn walk(dir: &Dir, prefix: &Path, files: &mut Vec<String>) -> io::Result<()> {
         if file_type.is_dir() && !is_config_dir(&name.to_string_lossy()) {
             walk(&entry.open_dir()?, &path, files)?;
         } else if file_type.is_file() {
-            files.push(path.to_string_lossy().into_owned());
+            files.push(File {
+                path: path.to_string_lossy().into_owned(),
+                modified: entry.metadata()?.modified()?.into_std(),
+            });
         }
     }
     Ok(())
@@ -164,6 +175,10 @@ mod tests {
         fs::write(dir.path().join(".obsidian/app.json"), "{}").unwrap();
         let vault = Vault::open(dir.path()).unwrap();
         (dir, vault)
+    }
+
+    fn paths(files: Vec<File>) -> Vec<String> {
+        files.into_iter().map(|file| file.path).collect()
     }
 
     fn assert_invalid(result: Result<impl fmt::Debug>) {
@@ -218,8 +233,11 @@ mod tests {
         symlink(dir.path().join("notes/a.md"), dir.path().join("link.md")).unwrap();
         vault.create("notes/sub/b.md", "b").unwrap();
 
-        assert_eq!(vault.files("").unwrap(), ["notes/a.md", "notes/sub/b.md"]);
-        assert_eq!(vault.files("notes/sub").unwrap(), ["notes/sub/b.md"]);
+        assert_eq!(
+            paths(vault.files("").unwrap()),
+            ["notes/a.md", "notes/sub/b.md"]
+        );
+        assert_eq!(paths(vault.files("notes/sub").unwrap()), ["notes/sub/b.md"]);
     }
 
     #[test]
@@ -232,6 +250,6 @@ mod tests {
 
         assert_eq!(vault.read("notes/a.md").unwrap(), "ab");
         assert_eq!(vault.read("AI/c.md").unwrap(), "c2");
-        assert_eq!(vault.files("AI").unwrap(), ["AI/c.md"]);
+        assert_eq!(paths(vault.files("AI").unwrap()), ["AI/c.md"]);
     }
 }
