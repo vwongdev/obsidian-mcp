@@ -35,6 +35,12 @@ pub struct PathParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct PathsParams {
+    /// Note paths relative to the vault root, such as `Projects/Plan.md`.
+    paths: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// Case-insensitive text to find in note paths and contents.
     query: String,
@@ -84,6 +90,16 @@ impl ObsidianServer {
         Parameters(PathParams { path }): Parameters<PathParams>,
     ) -> Result<String, String> {
         self.run(move |vault| vault.read(&path)).await
+    }
+
+    #[tool(
+        description = "Read several notes at once. Each note is headed `==> path <==`; a note that cannot be read shows its error in place of content."
+    )]
+    async fn read_notes(
+        &self,
+        Parameters(PathsParams { paths }): Parameters<PathsParams>,
+    ) -> Result<String, String> {
+        self.run(move |vault| Ok(read_all(vault, &paths))).await
     }
 
     #[tool(
@@ -165,6 +181,17 @@ impl ServerHandler for ObsidianServer {
     }
 }
 
+fn read_all(vault: &Vault, paths: &[String]) -> String {
+    let notes: Vec<_> = paths
+        .iter()
+        .map(|path| {
+            let content = vault.read(path).unwrap_or_else(|e| format!("error: {e}"));
+            format!("==> {path} <==\n{content}")
+        })
+        .collect();
+    notes.join("\n\n")
+}
+
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {
     let query = query.to_lowercase();
     let mut matches = Vec::new();
@@ -197,6 +224,20 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn reads_notes_past_failures() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.md"), "a").unwrap();
+        fs::write(dir.path().join("b.md"), "b").unwrap();
+        let vault = Vault::open(dir.path(), "AI").unwrap();
+        let paths = ["a.md", "missing.md", "b.md"].map(String::from);
+
+        let output = read_all(&vault, &paths);
+
+        assert!(output.starts_with("==> a.md <==\na\n\n==> missing.md <==\nerror: "));
+        assert!(output.ends_with("\n\n==> b.md <==\nb"));
+    }
 
     #[tokio::test]
     async fn overwrites_only_inside_write_folder() {
