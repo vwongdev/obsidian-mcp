@@ -23,6 +23,8 @@ env:
 jobs:
   publish-aws:
     runs-on: ubuntu-24.04
+    # TODO: Remove once AWS role assumption from GitHub OIDC is fixed
+    continue-on-error: true
     strategy:
       matrix:
         include:
