@@ -12,7 +12,6 @@ use tokio::task;
 
 use crate::vault::{self, Vault};
 
-const OVERWRITE_FOLDER: &str = "AI";
 const DEFAULT_SEARCH_LIMIT: usize = 50;
 const MAX_SEARCH_LIMIT: usize = 200;
 
@@ -84,7 +83,9 @@ impl ObsidianServer {
         self.run(move |vault| search(vault, &query, limit)).await
     }
 
-    #[tool(description = "Create a new note. Fails if the note already exists.")]
+    #[tool(
+        description = "Create a new note inside the writable folder. Fails if the note already exists."
+    )]
     async fn create_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
@@ -96,7 +97,9 @@ impl ObsidianServer {
         .await
     }
 
-    #[tool(description = "Append content to the end of an existing note.")]
+    #[tool(
+        description = "Append content to the end of an existing note inside the writable folder."
+    )]
     async fn append_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
@@ -108,18 +111,11 @@ impl ObsidianServer {
         .await
     }
 
-    #[tool(
-        description = "Create or overwrite a note inside the `AI/` folder. Notes elsewhere cannot be overwritten."
-    )]
+    #[tool(description = "Create or overwrite a note inside the writable folder.")]
     async fn write_ai_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
     ) -> Result<String, String> {
-        if path.split('/').next() != Some(OVERWRITE_FOLDER) {
-            return Err(format!(
-                "{path}: only notes inside {OVERWRITE_FOLDER}/ can be overwritten"
-            ));
-        }
         self.run(move |vault| {
             vault.replace(&path, &content)?;
             Ok(format!("Wrote {path}"))
@@ -147,10 +143,11 @@ impl ServerHandler for ObsidianServer {
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
             ))
-            .with_instructions(
-                "Access to the notes in an Obsidian vault. Notes can be listed, read, searched, created and appended to; \
-                 existing notes can only be overwritten inside the AI/ folder.",
-            )
+            .with_instructions(format!(
+                "Access to the notes in an Obsidian vault. Notes can be listed and read anywhere, \
+                 but only created, appended to and overwritten inside the writable folder, {}/.",
+                self.vault.write_folder().display()
+            ))
     }
 }
 
@@ -188,10 +185,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn overwrites_only_inside_ai_folder() {
+    async fn overwrites_only_inside_write_folder() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("note.md"), "original").unwrap();
-        let server = ObsidianServer::new(Arc::new(Vault::open(dir.path()).unwrap()));
+        let server = ObsidianServer::new(Arc::new(Vault::open(dir.path(), "AI").unwrap()));
         let write = |path: &str| {
             Parameters(WriteParams {
                 path: path.into(),

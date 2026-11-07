@@ -14,6 +14,7 @@ const CONFIG_DIR: &str = ".obsidian";
 /// A vault directory handle; every path is opened relative to it, so `..` and symlinks cannot escape.
 pub struct Vault {
     root: Dir,
+    write_folder: PathBuf,
 }
 
 #[derive(Debug)]
@@ -31,6 +32,8 @@ impl fmt::Display for VaultError {
     }
 }
 
+impl std::error::Error for VaultError {}
+
 impl From<io::Error> for VaultError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
@@ -40,10 +43,18 @@ impl From<io::Error> for VaultError {
 pub type Result<T> = std::result::Result<T, VaultError>;
 
 impl Vault {
-    pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
-        Ok(Self {
+    /// Opens a vault that only permits writes inside `write_folder`.
+    pub fn open(path: impl AsRef<Path>, write_folder: &str) -> Result<Self> {
+        let mut vault = Self {
             root: Dir::open_ambient_dir(path, ambient_authority())?,
-        })
+            write_folder: PathBuf::new(),
+        };
+        vault.write_folder = vault.resolve(write_folder)?;
+        Ok(vault)
+    }
+
+    pub fn write_folder(&self) -> &Path {
+        &self.write_folder
     }
 
     pub fn read(&self, path: &str) -> Result<String> {
@@ -52,7 +63,7 @@ impl Vault {
 
     /// Writes a new file, failing if one already exists.
     pub fn create(&self, path: &str, content: &str) -> Result<()> {
-        let path = self.resolve(path)?;
+        let path = self.resolve_writable(path)?;
         self.create_parent(&path)?;
         let mut file = self
             .root
@@ -62,7 +73,7 @@ impl Vault {
 
     /// Appends to an existing file.
     pub fn append(&self, path: &str, content: &str) -> Result<()> {
-        let path = self.resolve(path)?;
+        let path = self.resolve_writable(path)?;
         let mut file = self
             .root
             .open_with(&path, OpenOptions::new().append(true))?;
@@ -71,7 +82,7 @@ impl Vault {
 
     /// Writes a file in full, renaming a temporary file into place so readers never see partial content.
     pub fn replace(&self, path: &str, content: &str) -> Result<()> {
-        let path = self.resolve(path)?;
+        let path = self.resolve_writable(path)?;
         self.create_parent(&path)?;
         let name = path.file_name().expect("resolved paths end in a name");
         let temp = path.with_file_name(format!(".{}.tmp", name.to_string_lossy()));
@@ -97,6 +108,17 @@ impl Vault {
             self.root.create_dir_all(parent)?;
         }
         Ok(())
+    }
+
+    fn resolve_writable(&self, path: &str) -> Result<PathBuf> {
+        let resolved = self.resolve(path)?;
+        if resolved == self.write_folder || !resolved.starts_with(&self.write_folder) {
+            return Err(VaultError::InvalidPath(format!(
+                "{path}: writes are only allowed inside {}/",
+                self.write_folder.display()
+            )));
+        }
+        Ok(resolved)
     }
 
     /// Validates a vault-relative path: no `..`, no config directory, no symlinked components.
@@ -162,7 +184,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
         fs::write(dir.path().join("notes/a.md"), "a").unwrap();
         fs::write(dir.path().join(".obsidian/app.json"), "{}").unwrap();
-        let vault = Vault::open(dir.path()).unwrap();
+        let vault = Vault::open(dir.path(), "AI").unwrap();
         (dir, vault)
     }
 
@@ -189,9 +211,10 @@ mod tests {
 
     #[test]
     fn rejects_config_directory() {
-        let (_dir, vault) = vault();
+        let (dir, vault) = vault();
         assert_invalid(vault.read(".obsidian/app.json"));
         assert_invalid(vault.create(".Obsidian/new.json", "{}"));
+        assert_invalid(Vault::open(dir.path(), ".obsidian").map(|_| ()));
         assert_invalid(vault.files(".obsidian"));
     }
 
@@ -209,14 +232,16 @@ mod tests {
 
         assert_invalid(vault.read("escape/secret"));
         assert_invalid(vault.read("notes/config/app.json"));
-        assert_invalid(vault.append("notes/config/app.json", "x"));
+        symlink(dir.path().join("notes"), dir.path().join("AI")).unwrap();
+        assert_invalid(vault.create("AI/b.md", "x"));
     }
 
     #[test]
     fn lists_files_without_config_or_symlinks() {
         let (dir, vault) = vault();
         symlink(dir.path().join("notes/a.md"), dir.path().join("link.md")).unwrap();
-        vault.create("notes/sub/b.md", "b").unwrap();
+        fs::create_dir_all(dir.path().join("notes/sub")).unwrap();
+        fs::write(dir.path().join("notes/sub/b.md"), "b").unwrap();
 
         assert_eq!(vault.files("").unwrap(), ["notes/a.md", "notes/sub/b.md"]);
         assert_eq!(vault.files("notes/sub").unwrap(), ["notes/sub/b.md"]);
@@ -225,13 +250,28 @@ mod tests {
     #[test]
     fn writes_files() {
         let (_dir, vault) = vault();
-        assert!(vault.create("notes/a.md", "x").is_err());
-        vault.append("notes/a.md", "b").unwrap();
+        vault.create("AI/a.md", "a").unwrap();
+        assert!(vault.create("AI/a.md", "x").is_err());
+        vault.append("AI/a.md", "b").unwrap();
         vault.replace("AI/c.md", "c1").unwrap();
         vault.replace("AI/c.md", "c2").unwrap();
 
-        assert_eq!(vault.read("notes/a.md").unwrap(), "ab");
+        assert_eq!(vault.read("AI/a.md").unwrap(), "ab");
         assert_eq!(vault.read("AI/c.md").unwrap(), "c2");
-        assert_eq!(vault.files("AI").unwrap(), ["AI/c.md"]);
+        assert_eq!(vault.files("AI").unwrap(), ["AI/a.md", "AI/c.md"]);
+    }
+
+    #[test]
+    fn writes_only_inside_write_folder() {
+        let (dir, vault) = vault();
+        assert_invalid(vault.create("notes/b.md", "b"));
+        assert_invalid(vault.append("notes/a.md", "b"));
+        assert_invalid(vault.replace("notes/a.md", "b"));
+        assert_invalid(vault.replace("AI", "b"));
+        assert_invalid(vault.create("AIx/b.md", "b"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("notes/a.md")).unwrap(),
+            "a"
+        );
     }
 }
