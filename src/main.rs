@@ -1,6 +1,8 @@
 mod auth;
 mod config;
 mod server;
+#[expect(dead_code, reason = "used by the note tools")]
+mod vault;
 
 use std::sync::Arc;
 
