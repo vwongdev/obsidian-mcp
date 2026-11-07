@@ -79,3 +79,11 @@ jobs:
           tags: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.GCP_REPOSITORY }}/${{ github.event.repository.name }}/${{ matrix.image }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  bump-image:
+    needs: [ publish-aws, publish-gcp ]
+    uses: VWongDev/apps/.github/workflows/bump-image.yaml@main
+    with:
+      app: ${{ github.event.repository.name }}
+      commit-message: "chore(obsidian-mcp): Update images to latest commit"
+    secrets: inherit
