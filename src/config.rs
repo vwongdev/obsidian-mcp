@@ -1,11 +1,14 @@
-use std::{env, net::SocketAddr};
+use std::{collections::HashSet, env, net::SocketAddr};
 
 use anyhow::{Context, Result, bail};
 use axum::http::Uri;
 
+use crate::auth::AuthConfig;
+
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub public_url: Uri,
+    pub auth: AuthConfig,
 }
 
 impl Config {
@@ -14,15 +17,29 @@ impl Config {
             .unwrap_or_else(|_| "0.0.0.0:8080".into())
             .parse()
             .context("LISTEN_ADDR must be a socket address")?;
-        let public_url: Uri = required("PUBLIC_URL")?
-            .parse()
-            .context("PUBLIC_URL must be a URL")?;
+        let resource = required("PUBLIC_URL")?.trim_end_matches('/').to_owned();
+        let public_url: Uri = resource.parse().context("PUBLIC_URL must be a URL")?;
         if public_url.authority().is_none() {
             bail!("PUBLIC_URL must include a host");
+        }
+        let allowed_subjects: HashSet<String> = required("ALLOWED_SUBJECTS")?
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        if allowed_subjects.is_empty() {
+            bail!("ALLOWED_SUBJECTS must list at least one subject");
         }
         Ok(Self {
             listen_addr,
             public_url,
+            auth: AuthConfig {
+                issuer: required("ISSUER_URL")?,
+                audience: required("AUDIENCE")?,
+                allowed_subjects,
+                resource,
+            },
         })
     }
 
