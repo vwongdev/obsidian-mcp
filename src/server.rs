@@ -127,6 +127,13 @@ impl ObsidianServer {
     }
 
     #[tool(
+        description = "Find links that resolve to no file, across every note in the vault. Returns `path: target` lines."
+    )]
+    async fn broken_links(&self) -> Result<String, String> {
+        self.run(broken_links).await
+    }
+
+    #[tool(
         description = "Search notes for text, case-insensitively. Returns matching paths and `path:line: text` matches."
     )]
     async fn search_notes(
@@ -218,6 +225,19 @@ fn read_all(vault: &Vault, paths: &[String]) -> String {
 
 fn file_paths(vault: &Vault) -> vault::Result<Vec<String>> {
     Ok(vault.files("")?.into_iter().map(|file| file.path).collect())
+}
+
+fn broken_links(vault: &Vault) -> vault::Result<String> {
+    let files = file_paths(vault)?;
+    let mut broken = Vec::new();
+    for path in files.iter().filter(|path| path.ends_with(".md")) {
+        for target in links::extract(&vault.read(path)?) {
+            if links::resolve(&target, path, &files).is_none() {
+                broken.push(format!("{path}: {target}"));
+            }
+        }
+    }
+    Ok(broken.join("\n"))
 }
 
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {

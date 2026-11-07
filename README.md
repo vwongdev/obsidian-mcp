@@ -8,7 +8,7 @@ MCP server giving Claude read and write access to an [Obsidian Sync](https://obs
 
 ## Capabilities
 - List, read and search notes
-- Resolve links in notes
+- Resolve links and find broken ones
 - Create, append to and overwrite notes inside a writable folder, `AI/` by default (`WRITE_FOLDER`)
 
 Notes cannot be deleted or moved, and Obsidian's config directory is off limits.
