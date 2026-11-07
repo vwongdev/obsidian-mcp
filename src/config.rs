@@ -9,6 +9,7 @@ pub struct Config {
     pub listen_addr: SocketAddr,
     pub public_url: Uri,
     pub vault_path: PathBuf,
+    pub write_folder: String,
     pub auth: AuthConfig,
 }
 
@@ -38,6 +39,7 @@ impl Config {
             vault_path: env::var("VAULT_PATH")
                 .unwrap_or_else(|_| "/vault".into())
                 .into(),
+            write_folder: env::var("WRITE_FOLDER").unwrap_or_else(|_| "AI".into()),
             auth: AuthConfig {
                 issuer: required("ISSUER_URL")?,
                 audience: required("AUDIENCE")?,

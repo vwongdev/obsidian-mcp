@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env()?;
     let allowed_hosts = config.allowed_hosts();
-    let vault = Arc::new(Vault::open(&config.vault_path)?);
+    let vault = Arc::new(Vault::open(&config.vault_path, &config.write_folder)?);
     let auth = Arc::new(Auth::discover(config.auth).await?);
     let shutdown = CancellationToken::new();
     let app = router(vault, allowed_hosts, auth, shutdown.child_token());
