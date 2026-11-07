@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use rmcp::{
     ServerHandler,
     handler::server::wrapper::Parameters,
@@ -12,7 +13,6 @@ use tokio::task;
 
 use crate::vault::{self, Vault};
 
-const OVERWRITE_FOLDER: &str = "AI";
 const DEFAULT_SEARCH_LIMIT: usize = 50;
 const MAX_SEARCH_LIMIT: usize = 200;
 
@@ -62,13 +62,26 @@ impl ObsidianServer {
         Self { vault }
     }
 
-    #[tool(description = "List note paths in the vault or in one folder, recursively.")]
+    #[tool(
+        description = "List note paths in the vault or in one folder, recursively, skipping dot folders such as `.trash`, each with its last modification time in UTC."
+    )]
     async fn list_notes(
         &self,
         Parameters(ListParams { folder }): Parameters<ListParams>,
     ) -> Result<String, String> {
-        self.run(move |vault| Ok(vault.files(&folder)?.join("\n")))
-            .await
+        self.run(move |vault| {
+            let lines: Vec<_> = vault
+                .files(&folder)?
+                .into_iter()
+                .map(|file| {
+                    let modified = DateTime::<Utc>::from(file.modified)
+                        .to_rfc3339_opts(SecondsFormat::Secs, true);
+                    format!("{}\t{modified}", file.path)
+                })
+                .collect();
+            Ok(lines.join("\n"))
+        })
+        .await
     }
 
     #[tool(description = "Read the content of a note.")]
@@ -100,7 +113,9 @@ impl ObsidianServer {
         self.run(move |vault| search(vault, &query, limit)).await
     }
 
-    #[tool(description = "Create a new note. Fails if the note already exists.")]
+    #[tool(
+        description = "Create a new note inside the writable folder. Fails if the note already exists."
+    )]
     async fn create_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
@@ -112,7 +127,9 @@ impl ObsidianServer {
         .await
     }
 
-    #[tool(description = "Append content to the end of an existing note.")]
+    #[tool(
+        description = "Append content to the end of an existing note inside the writable folder."
+    )]
     async fn append_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
@@ -124,18 +141,11 @@ impl ObsidianServer {
         .await
     }
 
-    #[tool(
-        description = "Create or overwrite a note inside the `AI/` folder. Notes elsewhere cannot be overwritten."
-    )]
+    #[tool(description = "Create or overwrite a note inside the writable folder.")]
     async fn write_ai_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
     ) -> Result<String, String> {
-        if path.split('/').next() != Some(OVERWRITE_FOLDER) {
-            return Err(format!(
-                "{path}: only notes inside {OVERWRITE_FOLDER}/ can be overwritten"
-            ));
-        }
         self.run(move |vault| {
             vault.replace(&path, &content)?;
             Ok(format!("Wrote {path}"))
@@ -163,10 +173,11 @@ impl ServerHandler for ObsidianServer {
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
             ))
-            .with_instructions(
-                "Access to the notes in an Obsidian vault. Notes can be listed, read, searched, created and appended to; \
-                 existing notes can only be overwritten inside the AI/ folder.",
-            )
+            .with_instructions(format!(
+                "Access to the notes in an Obsidian vault. Notes can be listed and read anywhere, \
+                 but only created, appended to and overwritten inside the writable folder, {}/.",
+                self.vault.write_folder().display()
+            ))
     }
 }
 
@@ -184,7 +195,7 @@ fn read_all(vault: &Vault, paths: &[String]) -> String {
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {
     let query = query.to_lowercase();
     let mut matches = Vec::new();
-    for path in vault.files("")? {
+    for vault::File { path, .. } in vault.files("")? {
         if matches.len() >= limit {
             break;
         }
@@ -219,7 +230,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("a.md"), "a").unwrap();
         fs::write(dir.path().join("b.md"), "b").unwrap();
-        let vault = Vault::open(dir.path()).unwrap();
+        let vault = Vault::open(dir.path(), "AI").unwrap();
         let paths = ["a.md", "missing.md", "b.md"].map(String::from);
 
         let output = read_all(&vault, &paths);
@@ -229,10 +240,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn overwrites_only_inside_ai_folder() {
+    async fn overwrites_only_inside_write_folder() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("note.md"), "original").unwrap();
-        let server = ObsidianServer::new(Arc::new(Vault::open(dir.path()).unwrap()));
+        let server = ObsidianServer::new(Arc::new(Vault::open(dir.path(), "AI").unwrap()));
         let write = |path: &str| {
             Parameters(WriteParams {
                 path: path.into(),
