@@ -90,7 +90,7 @@ impl Vault {
         Ok(self.root.rename(&temp, &self.root, &path)?)
     }
 
-    /// Lists files under a folder recursively, skipping symlinks and the Obsidian config directory.
+    /// Lists files under a folder recursively, skipping symlinks and dot folders such as the Obsidian config directory.
     pub fn files(&self, folder: &str) -> Result<Vec<String>> {
         let mut files = Vec::new();
         if folder.is_empty() {
@@ -156,7 +156,7 @@ fn walk(dir: &Dir, prefix: &Path, files: &mut Vec<String>) -> io::Result<()> {
         let name = entry.file_name();
         let path = prefix.join(&name);
         let file_type = entry.file_type()?;
-        if file_type.is_dir() && !is_config_dir(&name.to_string_lossy()) {
+        if file_type.is_dir() && !name.to_string_lossy().starts_with('.') {
             walk(&entry.open_dir()?, &path, files)?;
         } else if file_type.is_file() {
             files.push(path.to_string_lossy().into_owned());
@@ -237,11 +237,15 @@ mod tests {
     }
 
     #[test]
-    fn lists_files_without_config_or_symlinks() {
+    fn lists_files_without_dot_folders_or_symlinks() {
         let (dir, vault) = vault();
         symlink(dir.path().join("notes/a.md"), dir.path().join("link.md")).unwrap();
         fs::create_dir_all(dir.path().join("notes/sub")).unwrap();
         fs::write(dir.path().join("notes/sub/b.md"), "b").unwrap();
+        fs::create_dir_all(dir.path().join(".trash")).unwrap();
+        fs::write(dir.path().join(".trash/old.md"), "old").unwrap();
+        fs::create_dir_all(dir.path().join("notes/.git")).unwrap();
+        fs::write(dir.path().join("notes/.git/HEAD"), "ref").unwrap();
 
         assert_eq!(vault.files("").unwrap(), ["notes/a.md", "notes/sub/b.md"]);
         assert_eq!(vault.files("notes/sub").unwrap(), ["notes/sub/b.md"]);
