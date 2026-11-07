@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use rmcp::{
     ServerHandler,
     handler::server::wrapper::Parameters,
@@ -56,14 +57,25 @@ impl ObsidianServer {
     }
 
     #[tool(
-        description = "List note paths in the vault or in one folder, recursively, skipping dot folders such as `.trash`."
+        description = "List note paths in the vault or in one folder, recursively, skipping dot folders such as `.trash`, each with its last modification time in UTC."
     )]
     async fn list_notes(
         &self,
         Parameters(ListParams { folder }): Parameters<ListParams>,
     ) -> Result<String, String> {
-        self.run(move |vault| Ok(vault.files(&folder)?.join("\n")))
-            .await
+        self.run(move |vault| {
+            let lines: Vec<_> = vault
+                .files(&folder)?
+                .into_iter()
+                .map(|file| {
+                    let modified = DateTime::<Utc>::from(file.modified)
+                        .to_rfc3339_opts(SecondsFormat::Secs, true);
+                    format!("{}\t{modified}", file.path)
+                })
+                .collect();
+            Ok(lines.join("\n"))
+        })
+        .await
     }
 
     #[tool(description = "Read the content of a note.")]
@@ -156,7 +168,7 @@ impl ServerHandler for ObsidianServer {
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {
     let query = query.to_lowercase();
     let mut matches = Vec::new();
-    for path in vault.files("")? {
+    for vault::File { path, .. } in vault.files("")? {
         if matches.len() >= limit {
             break;
         }
