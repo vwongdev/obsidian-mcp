@@ -56,7 +56,9 @@ impl ObsidianServer {
         Self { vault }
     }
 
-    #[tool(description = "List note paths in the vault or in one folder, recursively.")]
+    #[tool(
+        description = "List note paths in the vault or in one folder, recursively, skipping dot folders such as `.trash`."
+    )]
     async fn list_notes(
         &self,
         Parameters(ListParams { folder }): Parameters<ListParams>,
