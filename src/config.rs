@@ -39,7 +39,7 @@ impl Config {
             vault_path: env::var("VAULT_PATH")
                 .unwrap_or_else(|_| "/vault".into())
                 .into(),
-            write_folder: env::var("WRITE_FOLDER").unwrap_or_else(|_| "AI".into()),
+            write_folder: env::var("WRITE_FOLDER").unwrap_or_else(|_| "000 Inbox/AI".into()),
             auth: AuthConfig {
                 issuer: required("ISSUER_URL")?,
                 audience: required("AUDIENCE")?,
