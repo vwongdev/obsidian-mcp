@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod links;
 mod server;
 mod vault;
 

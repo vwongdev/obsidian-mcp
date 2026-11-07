@@ -8,6 +8,7 @@ MCP server giving Claude read and write access to an [Obsidian Sync](https://obs
 
 ## Capabilities
 - List, read and search notes
+- Resolve links and find broken ones
 - Create notes and append to existing ones
 - Freely write notes inside an `AI/` folder
 

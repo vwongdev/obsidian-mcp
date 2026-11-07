@@ -10,7 +10,10 @@ use rmcp::{
 use serde::Deserialize;
 use tokio::task;
 
-use crate::vault::{self, Vault};
+use crate::{
+    links,
+    vault::{self, Vault},
+};
 
 const OVERWRITE_FOLDER: &str = "AI";
 const DEFAULT_SEARCH_LIMIT: usize = 50;
@@ -71,6 +74,34 @@ impl ObsidianServer {
         Parameters(PathParams { path }): Parameters<PathParams>,
     ) -> Result<String, String> {
         self.run(move |vault| vault.read(&path)).await
+    }
+
+    #[tool(
+        description = "List the links in a note as `target -> path`, resolving each target to the vault path it points to, or `(unresolved)`."
+    )]
+    async fn list_links(
+        &self,
+        Parameters(PathParams { path }): Parameters<PathParams>,
+    ) -> Result<String, String> {
+        self.run(move |vault| {
+            let files = vault.files("")?;
+            let lines: Vec<_> = links::extract(&vault.read(&path)?)
+                .into_iter()
+                .map(|target| {
+                    let resolved = links::resolve(&target, &path, &files).unwrap_or("(unresolved)");
+                    format!("{target} -> {resolved}")
+                })
+                .collect();
+            Ok(lines.join("\n"))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Find links that resolve to no file, across every note in the vault. Returns `path: target` lines."
+    )]
+    async fn broken_links(&self) -> Result<String, String> {
+        self.run(broken_links).await
     }
 
     #[tool(
@@ -152,6 +183,19 @@ impl ServerHandler for ObsidianServer {
                  existing notes can only be overwritten inside the AI/ folder.",
             )
     }
+}
+
+fn broken_links(vault: &Vault) -> vault::Result<String> {
+    let files = vault.files("")?;
+    let mut broken = Vec::new();
+    for path in files.iter().filter(|path| path.ends_with(".md")) {
+        for target in links::extract(&vault.read(path)?) {
+            if links::resolve(&target, path, &files).is_none() {
+                broken.push(format!("{path}: {target}"));
+            }
+        }
+    }
+    Ok(broken.join("\n"))
 }
 
 fn search(vault: &Vault, query: &str, limit: usize) -> vault::Result<String> {
