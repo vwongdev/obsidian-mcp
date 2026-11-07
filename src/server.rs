@@ -173,7 +173,7 @@ impl ObsidianServer {
     }
 
     #[tool(description = "Create or overwrite a note inside the writable folder.")]
-    async fn write_ai_note(
+    async fn write_note(
         &self,
         Parameters(WriteParams { path, content }): Parameters<WriteParams>,
     ) -> Result<String, String> {
@@ -299,8 +299,8 @@ mod tests {
             })
         };
 
-        assert!(server.write_ai_note(write("note.md")).await.is_err());
-        assert!(server.write_ai_note(write("AI/note.md")).await.is_ok());
+        assert!(server.write_note(write("note.md")).await.is_err());
+        assert!(server.write_note(write("AI/note.md")).await.is_ok());
         assert_eq!(
             fs::read_to_string(dir.path().join("note.md")).unwrap(),
             "original"
