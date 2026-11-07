@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "obsidian-headless": "0.0.14"
+  }
+}
