@@ -1,4 +1,4 @@
-use std::{collections::HashSet, env, net::SocketAddr};
+use std::{collections::HashSet, env, net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use axum::http::Uri;
@@ -8,6 +8,7 @@ use crate::auth::AuthConfig;
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub public_url: Uri,
+    pub vault_path: PathBuf,
     pub auth: AuthConfig,
 }
 
@@ -34,6 +35,9 @@ impl Config {
         Ok(Self {
             listen_addr,
             public_url,
+            vault_path: env::var("VAULT_PATH")
+                .unwrap_or_else(|_| "/vault".into())
+                .into(),
             auth: AuthConfig {
                 issuer: required("ISSUER_URL")?,
                 audience: required("AUDIENCE")?,

@@ -1,7 +1,6 @@
 mod auth;
 mod config;
 mod server;
-#[expect(dead_code, reason = "used by the note tools")]
 mod vault;
 
 use std::sync::Arc;
@@ -19,6 +18,7 @@ use crate::{
     auth::{Auth, protected_resource_metadata, require_token},
     config::Config,
     server::ObsidianServer,
+    vault::Vault,
 };
 
 #[tokio::main]
@@ -29,9 +29,10 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env()?;
     let allowed_hosts = config.allowed_hosts();
+    let vault = Arc::new(Vault::open(&config.vault_path)?);
     let auth = Arc::new(Auth::discover(config.auth).await?);
     let shutdown = CancellationToken::new();
-    let app = router(allowed_hosts, auth, shutdown.child_token());
+    let app = router(vault, allowed_hosts, auth, shutdown.child_token());
 
     let listener = TcpListener::bind(config.listen_addr).await?;
     tracing::info!("listening on {}", config.listen_addr);
@@ -44,9 +45,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn router(allowed_hosts: Vec<String>, auth: Arc<Auth>, shutdown: CancellationToken) -> Router {
+fn router(
+    vault: Arc<Vault>,
+    allowed_hosts: Vec<String>,
+    auth: Arc<Auth>,
+    shutdown: CancellationToken,
+) -> Router {
     let mcp = StreamableHttpService::new(
-        || Ok(ObsidianServer),
+        move || Ok(ObsidianServer::new(vault.clone())),
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default()
             .with_cancellation_token(shutdown)
