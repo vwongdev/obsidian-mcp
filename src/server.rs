@@ -1,11 +1,14 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use rmcp::{
-    ServerHandler,
-    handler::server::wrapper::Parameters,
-    model::{Implementation, ServerCapabilities, ServerConfig},
+    ErrorData, RoleServer, ServerHandler,
+    handler::server::{tool::ToolCallContext, wrapper::Parameters},
+    model::{
+        CallToolRequestParams, CallToolResponse, Implementation, ServerCapabilities, ServerConfig,
+    },
     schemars::{self, JsonSchema},
+    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -198,6 +201,27 @@ impl ObsidianServer {
 
 #[tool_handler]
 impl ServerHandler for ObsidianServer {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let tool = request.name.clone();
+        let started = Instant::now();
+        let response = Self::tool_router()
+            .call(ToolCallContext::new(self, request, context))
+            .await;
+        let elapsed_ms = started.elapsed().as_millis();
+        match &response {
+            Ok(CallToolResponse::Complete(result)) if result.is_error == Some(true) => {
+                tracing::warn!(%tool, elapsed_ms, "tool call failed")
+            }
+            Ok(_) => tracing::info!(%tool, elapsed_ms, "tool call succeeded"),
+            Err(error) => tracing::warn!(%tool, elapsed_ms, %error.message, "tool call rejected"),
+        }
+        response
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(
