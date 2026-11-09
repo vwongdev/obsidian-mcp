@@ -20,6 +20,7 @@
               rustc
               rustfmt
               rust-analyzer
+              nodejs_22
               gh
               docker-client
             ];
